@@ -153,6 +153,7 @@ Hello from myapp1-1-2jctm v1
 ```
 
 Using the _Developer Console_ should 
+
 ![Apps Split Route Overview](images/routes_splitting_traffic/app_splitroute.png)
 
 Click the ">" arrow to see more details
