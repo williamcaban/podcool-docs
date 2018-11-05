@@ -116,6 +116,7 @@ Back the Overview tab you will see three versions of the app deployed but only `
 ![Apps Overview](images/routes_splitting_traffic/overview_apps.png)
 
 Click the ">" arrow to see more details
+
 ![Apps Overview Detail](images/routes_splitting_traffic/overview_app_detail.png)
 
 
@@ -155,6 +156,7 @@ Using the _Developer Console_ should
 ![Apps Split Route Overview](images/routes_splitting_traffic/app_splitroute.png)
 
 Click the ">" arrow to see more details
+
 ![Apps Split Route Overview Detail](images/routes_splitting_traffic/app_splitroute_detail.png)
 
 
