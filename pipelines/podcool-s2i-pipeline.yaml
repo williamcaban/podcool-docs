@@ -1,0 +1,168 @@
+kind: "BuildConfig"
+apiVersion: "v1"
+metadata:
+  name: "poodcool-s2i-pipeline"
+spec:
+  strategy:
+    jenkinsPipelineStrategy:
+      jenkinsfile: |-
+        pipeline {
+          agent any
+          
+          options {
+            // set a timeout of 5 minutes for this pipeline
+            timeout(time: 5, unit: 'MINUTES')
+          } //options
+
+          environment {
+            APPLICATION_NAME = 'podcool-cicd'
+            GIT_REPO      = "http://github.com/williamcaban/podcool.git"
+            GIT_BRANCH    = "master"
+            STAGE_TAG     = "staging"
+            DEV_PROJECT   = "dev"
+            STAGE_PROJECT = "stage"
+            SVC_PORT = 8080;
+          }
+
+          stages {
+
+                stage('preamble') {
+                    steps {
+                        echo 'Running preamble stage'
+                        script {
+                            openshift.withCluster() {
+                                openshift.withProject() {
+                                    echo "Using project: ${openshift.project()}"
+                                }
+                            }
+                        }
+                    }
+                }
+
+                stage('cleanup') {
+                    steps {
+                        echo 'Cleaning previous Staging deployment'
+                        script {
+                            openshift.withCluster() {
+                                openshift.withProject() {
+                                    if (openshift.selector("bc", "${APPLICATION_NAME}-${STAGE_TAG}").exists()) {
+                                      openshift.selector("bc", "${APPLICATION_NAME}-${STAGE_TAG}" ).delete()
+                                    }
+                                    if (openshift.selector("dc", "${APPLICATION_NAME}-${STAGE_TAG}").exists()) {
+                                      openshift.selector("dc", "${APPLICATION_NAME}-${STAGE_TAG}" ).delete()
+                                    }
+                                    if (openshift.selector("svc", "${APPLICATION_NAME}-${STAGE_TAG}").exists()) {
+                                      openshift.selector("svc", "${APPLICATION_NAME}-${STAGE_TAG}").delete()
+                                    }
+                                    if (openshift.selector("route", "${APPLICATION_NAME}-${STAGE_TAG}").exists()) {
+                                      openshift.selector("route", "${APPLICATION_NAME}-${STAGE_TAG}").delete()
+                                    }
+                                    // delete any secrets with this "${APPLICATION_NAME}-${STAGE_TAG}" label
+                                    if (openshift.selector("secrets", "${APPLICATION_NAME}-${STAGE_TAG}").exists()) {
+                                        openshift.selector("secrets", "${APPLICATION_NAME}-${STAGE_TAG}").delete()
+                                    } 
+                                } // withProject
+                            } //withCluster
+                        } // script
+                    } // steps
+                } // stage:cleanup
+
+                stage('Build') {
+                    steps {
+                        echo 'Build new app using s2i source strategy'
+                        script {
+                            openshift.withCluster() {
+
+                                if (openshift.selector("bc",APPLICATION_NAME).exists()) {
+                                  echo "Using existing BuildConfig. Running new Build"
+                                  def bc = openshift.startBuild(APPLICATION_NAME)
+                                  openshift.set("env dc/${APPLICATION_NAME} APP_VERSION=v${BUILD_NUMBER}")
+                                  // output build logs to the Jenkins conosole
+                                  echo "Logs from build"
+                                  def result = bc.logs('-f')
+                                  // actions that took place
+                                  echo "The logs operation require ${result.actions.size()} 'oc' interactions"
+                                  // see exactly what oc command was executed.
+                                  echo "Logs executed: ${result.actions[0].cmd}"
+                                } else {
+                                  echo "No proevious BuildConfig. Creating new BuildConfig."
+                                  def myNewApp = openshift.newApp(GIT_REPO,"--strategy=source","--name=${APPLICATION_NAME}","-e APP_VERSION=v${BUILD_NUMBER}")
+                                  echo "new-app myNewApp ${myNewApp.count()} objects named: ${myNewApp.names()}"
+                                  myNewApp.describe()
+                                  // selects the build config 
+                                  def bc = myNewApp.narrow('bc')
+                                  // output build logs to the Jenkins conosole
+                                  echo "Logs from build"
+                                  def result = bc.logs('-f')
+                                  // actions that took place
+                                  echo "The logs operation require ${result.actions.size()} 'oc' interactions"
+                                  // see exactly what oc command was executed.
+                                  echo "Logs executed: ${result.actions[0].cmd}"
+                                } //else
+
+                                echo "Validating Route for Service exist, if Not create Route"
+                                if (!openshift.selector("route",APPLICATION_NAME).exists()) {
+                                  openshift.selector("svc",APPLICATION_NAME).expose("--port=${SVC_PORT}")
+                                }
+
+                                echo "Tag Container image with 'build number' as version"
+                                openshift.tag("${APPLICATION_NAME}:latest", "${APPLICATION_NAME}:v${BUILD_NUMBER}")
+
+                            } // withCluster
+                        } // script
+                    } // steps
+                } // stage:cleanup
+
+                stage('TestService') {
+                    steps {
+                        echo 'Test Service is operational and responding'
+                        script {
+                            openshift.withCluster() {
+                                  openshift.withProject() {
+                                      echo sh (script: "curl -I ${APPLICATION_NAME}.${openshift.project()}.svc.cluster.local:${SVC_PORT}/hello", returnStdout: true)
+                                  } // withProject
+                            } // withCluster
+                        } // script
+                    } // steps
+                } // stage:verifyservice 
+
+                stage('PromoteImage') {
+                    steps {
+                        echo 'Waiting for human input'
+                        timeout(time:5, unit:'MINUTES') {
+                            input message: "Promote Image to STAGE?", ok: "Promote"
+                        }
+                        script {
+                            openshift.withCluster() {
+                                openshift.withProject() {
+                                    // if everything else succeeded, tag the ${APPLICATION_NAME}:latest image as ${APPLICATION_NAME}-staging:latest
+                                    // a pipeline build config for the staging environment can watch for the ${APPLICATION_NAME}-staging:latest
+                                    // image to change and then deploy it to the staging environment
+                                    openshift.tag("${APPLICATION_NAME}:latest", "${APPLICATION_NAME}-staging:v${BUILD_NUMBER}")
+                                    openshift.tag("${APPLICATION_NAME}-${STAGE_TAG}:v${BUILD_NUMBER}", "${APPLICATION_NAME}-${STAGE_TAG}:latest")
+                                }
+                            }
+                        } // script
+                    } // steps
+                } // stage
+
+                stage('DeployStaging') {
+                    steps {
+                        echo 'Creating staging Deployment'
+                        script {
+                            openshift.withCluster() {
+                                openshift.withProject() {
+                                  def myStagingApp = openshift.newApp("${APPLICATION_NAME}-${STAGE_TAG}:latest","--name=${APPLICATION_NAME}-${STAGE_TAG}","-e APP_VERSION=v${BUILD_NUMBER}")
+                                  myStagingApp.narrow("svc").expose("--port=${SVC_PORT}")
+                                  myStagingApp.narrow("dc").scale("--replicas=3")
+
+                                }
+                            }
+                        } // script
+                    } // steps
+                } // stage
+
+            } // stages
+        } // pipeline
+
+      type: JenkinsPipeline
