@@ -22,13 +22,11 @@ ACTIVITIES:
 - [Deployment Strategies](deployment_strategies.md) This lab demonstrate how to use build strategies like: s2i and docker to onboard an application
 - [Splitting Traffic](routes_splitting_traffic.md) This lab demonstrate how to use OpenShift router to split traffic across different versions of an application.
 - [Simulating Webhooks](webhooks_simulation.md) This lab simulate rebuilds triggered by webhooks.
+- [CI/CD Pipelines](https://github.com/williamcaban/podcicd) This activity shows a multi-project CI/CD pipeline
+- [ServiceMesh](https://github.com/williamcaban/openshift-servicemesh) Simplify installation of OpenShift ServiceMesh
 
 DEMOS:
 - [Quay Registry Demo](quay_registry_overview.md) This demo ilustrates the secuirty scanning functionalities of Quay.io or _Quay Enterprise_.
 
-
-
 Comming soon:
-- CI/CD Pipelines
-- Service Mesh
 - Multus
